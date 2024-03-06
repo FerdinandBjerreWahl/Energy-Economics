@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import statsmodels.api as sm
 
 def read_power_data():
     dfs = []
@@ -235,15 +236,18 @@ def calculate_volatility(data, frequency, date_column='Date', value_column='Day 
     if weighted_volatility is not None:
         weighted_volatility_reset = weighted_volatility.reset_index()
 
-        
+        # Create the 'Date' column based on the frequency
         if 'Day' in weighted_volatility_reset.columns:
             weighted_volatility_reset['Date'] = pd.to_datetime(weighted_volatility_reset[['Year', 'Month', 'Day']].astype(str).agg('-'.join, axis=1) + '-01')
             weighted_volatility_reset = weighted_volatility_reset.drop(columns=['Day'])
-        else:
+        elif 'Month' in weighted_volatility_reset.columns:
             weighted_volatility_reset['Date'] = pd.to_datetime(weighted_volatility_reset[['Year', 'Month']].astype(str).agg('-'.join, axis=1) + '-01')
-        weighted_volatility_reset = weighted_volatility_reset.drop(columns=['Year', 'Month'])
-        weighted_volatility_reset['Weighted_volatility_adj'] = weighted_volatility_reset[0].pct_change().dropna() # Adjusted here
-        weighted_volatility_reset = weighted_volatility_reset[['Date','Weighted_volatility_adj']]
+        else:
+            weighted_volatility_reset['Date'] = pd.to_datetime(weighted_volatility_reset[['Year']].astype(str).agg('-'.join, axis=1) + '-01')
+
+        # Compute the percentage change for 'Weighted_volatility_adj'
+        weighted_volatility_reset['Weighted_volatility_adj'] = weighted_volatility_reset[0].pct_change().dropna()
+        weighted_volatility_reset = weighted_volatility_reset[['Date', 'Weighted_volatility_adj']]
         weighted_volatility_reset.dropna(inplace=True)
     else:
         weighted_volatility_reset = None
@@ -251,16 +255,73 @@ def calculate_volatility(data, frequency, date_column='Date', value_column='Day 
     weighted_volatility_reset['Date'] = pd.to_datetime(weighted_volatility_reset['Date']).dt.date
     weighted_volatility_reset['Date'] = pd.to_datetime(weighted_volatility_reset['Date'])
 
-    
     return weighted_volatility_reset
 
 
 
-def filter_dates_by_interval(data, column_name_solar, interval_start, interval_end, date):
+def filter_dates_by_interval(data, column_names, interval_start, interval_end, date, print_deleted_dates=False):
     data['Date'] = pd.to_datetime(data['Date'])
     data = data[data['Date'] < date]
-    filtered_dates = data[(data[column_name_solar] >= interval_start) & (data[column_name_solar] <= interval_end)]
+    
+    filtered_dates = data
+    for column_name in column_names:
+        filtered_dates = filtered_dates[(filtered_dates[column_name] >= interval_start) & (filtered_dates[column_name] <= interval_end)]
+    
     deleted_dates = data[~data.index.isin(filtered_dates.index)]  # Get dates not in filtered_dates
-    print("Deleted Dates:")
-    print(deleted_dates['Date'])
+    
+    if print_deleted_dates:
+        print("Deleted Dates:")
+        print(deleted_dates['Date'])
+    
     return filtered_dates
+
+
+def fixed_effect_model(data, category_column, capture_column, outcome_column, date_component):
+    # Extract the specified component from the datetime column
+    if date_component == 'year':
+        data[date_component] = data['Date'].dt.year
+    elif date_component == 'month':
+        data[date_component] = data['Date'].dt.month
+    elif date_component == 'day':
+        data[date_component] = data['Date'].dt.day
+
+    # Add constant and relevant columns to the design matrix
+    X = sm.add_constant(data[[capture_column, date_component]])
+    y = data[outcome_column]
+
+    # Fit the model using robust linear regression with fixed effects
+    model = sm.RLM(y, X).fit()
+
+    # Print the summary of the model
+    return model.summary()
+
+def analyze_power_data(frequency='daily', interval_start=-1.0, interval_end=1.0, date=pd.Timestamp(2024, 1, 1), FE='year'):
+    # Read power data
+    Power_DATA = read_power_data()
+    
+    # Define energy sources
+    energy_sources = ['Wind offshore', 'Wind onshore', 'Solar']
+    
+    # Calculate capture factors
+    percentage_change_df = calculate_capture_factors(Power_DATA, energy_sources, frequency)
+    
+    # Calculate volatility
+    weighted_volatility_reset = calculate_volatility(Power_DATA, frequency=frequency)
+    
+    # Merge data
+    ANALYSE_DATA = pd.merge(percentage_change_df, weighted_volatility_reset, on='Date', how='inner')
+    
+    # Filter Data
+    column_names = ['Capture_Factor_Wind offshore', 'Capture_Factor_Wind onshore', 'Capture_Factor_Solar']
+    ANALYSE_DATA_F = filter_dates_by_interval(ANALYSE_DATA, column_names, interval_start, interval_end, date, print_deleted_dates=False)
+    
+    # The Analysis:
+    onshore_summary_year = fixed_effect_model(ANALYSE_DATA_F, 'Month', 'Capture_Factor_Wind onshore', 'Weighted_volatility_adj', FE)
+    offshore_summary_month = fixed_effect_model(ANALYSE_DATA_F, 'Month', 'Capture_Factor_Wind offshore', 'Weighted_volatility_adj', FE)
+    solar_summary_day = fixed_effect_model(ANALYSE_DATA_F, 'Month', 'Capture_Factor_Solar', 'Weighted_volatility_adj', FE)
+    
+    # Print the summaries
+    print(onshore_summary_year)
+    print(offshore_summary_month)
+    print(solar_summary_day)
+
