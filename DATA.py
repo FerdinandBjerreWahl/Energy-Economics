@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
 import statsmodels.api as sm
+from statsmodels.stats.stattools import durbin_watson
+from statsmodels.stats.diagnostic import acorr_ljungbox
 
 def read_power_data():
     dfs = []
@@ -275,7 +277,6 @@ def filter_dates_by_interval(data, column_names, interval_start, interval_end, d
     
     return filtered_dates
 
-
 def fixed_effect_model(data, category_column, capture_column, outcome_column, date_component):
     # Extract the specified component from the datetime column
     if date_component == 'year':
@@ -291,9 +292,21 @@ def fixed_effect_model(data, category_column, capture_column, outcome_column, da
 
     # Fit the model using robust linear regression with fixed effects
     model = sm.RLM(y, X).fit()
+    
+    # Get the residuals
+    residuals = model.resid
 
-    # Print the summary of the model
-    return model.summary()
+    # Perform the Ljung-Box test
+    lb_test_statistic = acorr_ljungbox(residuals)
+
+    # Print the test statistic and p-value
+    print("Ljung-Box test statistic:", lb_test_statistic)
+
+    # Perform Durbin-Watson test for autocorrelation
+    #dw_test = durbin_watson(model.resid)
+    #dw_test = print('Autocorrelation',dw_test)
+    return model.summary(), #dw_test
+
 
 def analyze_power_data(frequency='daily', interval_start=-1.0, interval_end=1.0, date=pd.Timestamp(2024, 1, 1), FE='year'):
     # Read power data
