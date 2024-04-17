@@ -181,6 +181,106 @@ def calculate_capture_factors(Power_DATA, energy_sources, frequency, datetime_co
 
 
 
+def calculate_capture_factors_plot(Power_DATA, energy_sources, frequency, datetime_column='Date', auction_column='Day Ahead Auction'):
+    # Convert 'Date' column to datetime format
+    Power_DATA[datetime_column] = pd.to_datetime(Power_DATA[datetime_column])
+
+    # Extract day, year, and month from the Date column
+    Power_DATA['Day'] = Power_DATA[datetime_column].dt.day
+    Power_DATA['Year'] = Power_DATA[datetime_column].dt.year
+    Power_DATA['Month'] = Power_DATA[datetime_column].dt.month
+
+    if frequency == 'daily':
+        Power_DATA['Date'] = Power_DATA[datetime_column].dt.date
+        # Group by date and calculate the total revenue and production for each renewable energy source
+        grouped = Power_DATA.groupby('Date').agg(
+            **{f'TotalRevenue{source}': (source, lambda x: (x * Power_DATA.loc[x.index, auction_column]).sum()) for source in energy_sources},
+            **{f'TotalProduction{source}': (source, 'sum') for source in energy_sources},
+            TotalRevenueBaseload=('Load', lambda x: (x * Power_DATA.loc[x.index, auction_column]).sum()),
+            BaseloadProduction=('Load', 'sum')
+        )
+
+        # Calculate the average price (capture price) for each renewable energy source
+        for source in energy_sources:
+            grouped[f'Capture_Price_{source}'] = grouped[f'TotalRevenue{source}'] / grouped[f'TotalProduction{source}']
+
+        grouped['Baseload_Price'] = grouped['TotalRevenueBaseload'] / grouped['BaseloadProduction']
+
+        # Calculate the capture factor compared to baseload production
+        for source in energy_sources:
+            grouped[f'Capture_Factor_{source}'] = grouped[f'Capture_Price_{source}'] / grouped['Baseload_Price']
+
+        grouped.reset_index(inplace=True)
+
+        # Display the results
+        capture_factors = grouped[['Date'] + [f'Capture_Factor_{source}' for source in energy_sources]]
+        capture_factors['Date'] = pd.to_datetime(capture_factors['Date'])
+
+    elif frequency == 'monthly':
+        # Group by date and calculate the total revenue and production for each renewable energy source
+        grouped = Power_DATA.groupby(['Year', 'Month']).agg(
+            **{f'TotalRevenue{source}': (source, lambda x: (x * Power_DATA.loc[x.index, auction_column]).sum()) for source in energy_sources},
+            **{f'TotalProduction{source}': (source, 'sum') for source in energy_sources},
+            TotalRevenueBaseload=('Load', lambda x: (x * Power_DATA.loc[x.index, auction_column]).sum()),
+            BaseloadProduction=('Load', 'sum')
+        )
+
+        # Calculate the average price (capture price) for each renewable energy source
+        for source in energy_sources:
+            grouped[f'Capture_Price_{source}'] = grouped[f'TotalRevenue{source}'] / grouped[f'TotalProduction{source}']
+
+        grouped['Baseload_Price'] = grouped['TotalRevenueBaseload'] / grouped['BaseloadProduction']
+
+        # Calculate the capture factor compared to baseload production
+        for source in energy_sources:
+            grouped[f'Capture_Factor_{source}'] = grouped[f'Capture_Price_{source}'] / grouped['Baseload_Price']
+
+        grouped.reset_index(inplace=True)
+
+        # Display the results
+        capture_factors = grouped[['Year', 'Month'] + [f'Capture_Factor_{source}' for source in energy_sources]]
+        capture_factors['Date'] = pd.to_datetime(capture_factors[['Year', 'Month']].assign(day=1))
+        capture_factors.reset_index(inplace=True)
+
+
+    elif frequency == 'yearly':
+        # Group by date and calculate the total revenue and production for each renewable energy source
+        grouped = Power_DATA.groupby(['Year']).agg(
+            **{f'TotalRevenue{source}': (source, lambda x: (x * Power_DATA.loc[x.index, auction_column]).sum()) for source in energy_sources},
+            **{f'TotalProduction{source}': (source, 'sum') for source in energy_sources},
+            TotalRevenueBaseload=('Load', lambda x: (x * Power_DATA.loc[x.index, auction_column]).sum()),
+            BaseloadProduction=('Load', 'sum')
+        )
+
+        # Calculate the average price (capture price) for each renewable energy source
+        for source in energy_sources:
+            grouped[f'Capture_Price_{source}'] = grouped[f'TotalRevenue{source}'] / grouped[f'TotalProduction{source}']
+
+        grouped['Baseload_Price'] = grouped['TotalRevenueBaseload'] / grouped['BaseloadProduction']
+
+        # Calculate the capture factor compared to baseload production
+        for source in energy_sources:
+            grouped[f'Capture_Factor_{source}'] = grouped[f'Capture_Price_{source}'] / grouped['Baseload_Price']
+
+        grouped.reset_index(inplace=True)
+
+        # Display the results
+        capture_factors = grouped[['Year'] + [f'Capture_Factor_{source}' for source in energy_sources]]
+        capture_factors['Date'] = pd.to_datetime(capture_factors['Year'], format='%Y', errors='coerce')
+
+        # Reset index to handle calculation issues
+        capture_factors.reset_index(drop=True, inplace=True)
+
+        # Calculate percentage change
+
+    return capture_factors[['Date', 'Capture_Factor_Wind offshore', 'Capture_Factor_Wind onshore', 'Capture_Factor_Solar']]
+
+
+
+
+
+
+
 def calculate_volatility(data, frequency, date_column='Date', value_column='Day Ahead Auction', weight_column='Load'):
     # Convert Date to datetime format
     data['Date'] = pd.to_datetime(data[date_column])
